@@ -38,7 +38,7 @@ class DsBridgeInAppWebViewState extends State<DsBridgeInAppWebView> {
   Widget build(BuildContext context) {
     return Builder(builder: (_) {
       return InAppWebView(
-        initialUrlRequest: URLRequest(url: Uri.parse("about:blank")),
+        initialUrlRequest: URLRequest(url: WebUri("about:blank")),
         onWebViewCreated: (InAppWebViewController controller) async {
           _controller = controller;
           _controller.setOptions(

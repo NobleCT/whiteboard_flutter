@@ -1,11 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
-
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-
-import 'bridge.dart';
+import 'package:whiteboard_sdk_flutter/whiteboard_sdk_flutter.dart';
 
 class DsBridgeWebView extends StatefulWidget {
   final BridgeCreatedCallback onDSBridgeCreated;
@@ -21,49 +18,47 @@ class DsBridgeWebView extends StatefulWidget {
 
 class DsBridgeWebViewState extends State<DsBridgeWebView> {
   DsBridgeBasic dsBridge = DsBridgeBasic();
-
   late WebViewController _controller;
 
   @override
   void initState() {
     super.initState();
-    if (Platform.isAndroid) {
-      WebView.platform = SurfaceAndroidWebView();
-    }
+    _initWebView();
+  }
+
+  Future<void> _initWebView() async {
+    final PlatformWebViewControllerCreationParams params =
+        PlatformWebViewControllerCreationParams();
+
+    _controller = WebViewController.fromPlatformCreationParams(params)
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.transparent)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageStarted: _onPageStarted,
+          onPageFinished: _onPageFinished,
+          onWebResourceError: _onWebResourceError,
+        ),
+      )
+      ..addJavaScriptChannel(
+        'DsBridge',
+        onMessageReceived: dsBridge.handleJavascriptMessage,
+      )
+      ..loadFlutterAsset("packages/whiteboard_sdk_flutter/assets/whiteboardBridge/index.html");
+
+  await _controller.setUserAgent(
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1 DsBridge/1.0.0");
+
+    dsBridge.initController(_controller);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Builder(builder: (_) {
-      return WebView(
-        initialUrl: "about:blank",
-        javascriptMode: JavascriptMode.unrestricted,
-        allowsInlineMediaPlayback: true,
-        javascriptChannels: {dsBridge.javascriptChannel},
-        initialMediaPlaybackPolicy: AutoMediaPlaybackPolicy.always_allow,
-        userAgent:
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1 DsBridge/1.0.0",
-        onWebViewCreated: (WebViewController controller) async {
-          _controller = controller;
-          dsBridge.initController(_controller);
-          await _controller.loadFlutterAsset(
-              "packages/whiteboard_sdk_flutter/assets/whiteboardBridge/index.html");
-        },
-        navigationDelegate: (NavigationRequest request) {
-          print('allowing navigation to $request');
-          return NavigationDecision.navigate;
-        },
-        onWebResourceError: _onWebResourceError,
-        onPageStarted: _onPageStarted,
-        onPageFinished: _onPageFinished,
-        gestureNavigationEnabled: true,
-      );
-    });
+    return WebViewWidget(controller: _controller);
   }
 
-  Future<void> _onPageStarted(String url) async {
+  void _onPageStarted(String url) {
     debugPrint('WebView Page started loading: $url');
-    if (url.endsWith("whiteboardBridge/index.html")) {}
   }
 
   Future<void> _onPageFinished(String url) async {
@@ -96,38 +91,36 @@ class DsBridgeBasic extends DsBridge {
 
   late WebViewController _controller;
 
-  JavascriptChannel? _javascriptChannel;
-
-  Future<void> initController(WebViewController controller) async {
+  void initController(WebViewController controller) {
     _controller = controller;
   }
 
   Future<void> runCompatScript() async {
     try {
-      await _controller.runJavascript(_compatDsScript);
+      await _controller.runJavaScript(_compatDsScript);
     } catch (e) {
       print("WebView bridge run compat script error $e");
     }
   }
 
-  JavascriptChannel get javascriptChannel {
-    _javascriptChannel ??= JavascriptChannel(
-      name: DsBridge.BRIDGE_NAME,
-      onMessageReceived: (JavascriptMessage message) {
-        var res = jsonDecode(message.message);
-        javascriptInterface.call(res["method"], res["args"]);
-      },
-    );
-    return _javascriptChannel!;
+  void handleJavascriptMessage(JavaScriptMessage message) {
+    var res = jsonDecode(message.message);
+    javascriptInterface.call(res["method"], res["args"]);
   }
 
-  @override
-  FutureOr<String?> evaluateJavascript(String javascript) async {
-    try {
-      return await _controller.runJavascriptReturningResult(javascript);
-    } catch (e) {
-      print("WebView bridge evaluateJavascript cause $e");
-      return null;
+@override
+FutureOr<String?> evaluateJavascript(String javascript) async {
+  try {
+    final result = await _controller.runJavaScriptReturningResult(javascript);
+    if (result is String) {
+      return result;
+    } else {
+      return result.toString();
     }
+  } catch (e) {
+    print("WebView bridge evaluateJavascript cause $e");
+    return null;
   }
+}
+
 }
