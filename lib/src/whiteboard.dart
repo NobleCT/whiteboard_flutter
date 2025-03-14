@@ -45,10 +45,11 @@ class WhiteboardView extends StatelessWidget {
     }
   }
 
-  void onDSBridgeCreated(DsBridge dsBridge) {
+void onDSBridgeCreated(DsBridge dsBridge) {
     dsBridge.addJavascriptObject(createSDKInterface());
+    print("✅ Whiteboard SDK interface added to JS Bridge.");
     onSdkCreated(WhiteSdk(options: options, dsBridge: dsBridge));
-  }
+}
 
   JavaScriptNamespaceInterface createSDKInterface() {
     var interface = JavaScriptNamespaceInterface("sdk");

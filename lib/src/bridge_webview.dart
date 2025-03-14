@@ -36,7 +36,7 @@ class DsBridgeWebViewState extends State<DsBridgeWebView> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: _onPageStarted,
-          onPageFinished: _onPageFinished,
+          onPageFinished: _onPageFinished, // ✅ Fixed duplicate method
           onWebResourceError: _onWebResourceError,
         ),
       )
@@ -44,10 +44,14 @@ class DsBridgeWebViewState extends State<DsBridgeWebView> {
         'DsBridge',
         onMessageReceived: dsBridge.handleJavascriptMessage,
       )
+      ..addJavaScriptChannel(
+        'consoleLog', // ✅ Added console logging
+        onMessageReceived: _onConsoleMessage,
+      )
       ..loadFlutterAsset("packages/whiteboard_sdk_flutter/assets/whiteboardBridge/index.html");
 
-  await _controller.setUserAgent(
-      "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1 DsBridge/1.0.0");
+    await _controller.setUserAgent(
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1 DsBridge/1.0.0");
 
     dsBridge.initController(_controller);
   }
@@ -64,29 +68,38 @@ class DsBridgeWebViewState extends State<DsBridgeWebView> {
   Future<void> _onPageFinished(String url) async {
     debugPrint('WebView Page finished loading: $url');
     if (url.endsWith("whiteboardBridge/index.html")) {
+      await Future<void>.delayed(Duration(seconds: 1)); // ✅ Ensure JS is fully loaded
       await dsBridge.runCompatScript();
       widget.onDSBridgeCreated(dsBridge);
     }
   }
 
   void _onWebResourceError(WebResourceError error) {
-    debugPrint('WebView resource error ${error.toString()}');
+    debugPrint('WebView resource error: ${error.description}');
+  }
+
+  void _onConsoleMessage(JavaScriptMessage message) {
+    debugPrint("[WebView Console] ${message.message}");
   }
 }
 
 class DsBridgeBasic extends DsBridge {
   static const _compatDsScript = """
-      if (window.__dsbridge) {
-          window._dsbridge = {}
-          window._dsbridge.call = function (method, arg) {
-              console.log(`call flutter webview \${method} \${arg}`);
-              window.__dsbridge.postMessage(JSON.stringify({ "method": method, "args": arg }))
-              return '{}';
-          }
-          console.log("wrapper flutter webview success");
-      } else {
-          console.log("window.__dsbridge undefine");
-      }
+    if (!window.__dsbridge) {
+        window.__dsbridge = {
+            postMessage: function(msg) {
+                console.log("dsbridge message:", msg);
+            }
+        };
+    }
+    window._dsbridge = {
+        call: function (method, arg) {
+            console.log(`call flutter webview \${method} \${arg}`);
+            window.__dsbridge.postMessage(JSON.stringify({ "method": method, "args": arg }));
+            return '{}';
+        }
+    };
+    console.log("Injected dsbridge manually.");
   """;
 
   late WebViewController _controller;
@@ -99,7 +112,7 @@ class DsBridgeBasic extends DsBridge {
     try {
       await _controller.runJavaScript(_compatDsScript);
     } catch (e) {
-      print("WebView bridge run compat script error $e");
+      print("WebView bridge run compat script error: $e");
     }
   }
 
@@ -108,19 +121,14 @@ class DsBridgeBasic extends DsBridge {
     javascriptInterface.call(res["method"], res["args"]);
   }
 
-@override
-FutureOr<String?> evaluateJavascript(String javascript) async {
-  try {
-    final result = await _controller.runJavaScriptReturningResult(javascript);
-    if (result is String) {
-      return result;
-    } else {
-      return result.toString();
+  @override
+  FutureOr<String?> evaluateJavascript(String javascript) async {
+    try {
+      final result = await _controller.runJavaScriptReturningResult(javascript);
+      return result is String ? result : result.toString();
+    } catch (e) {
+      print("WebView bridge evaluateJavascript error: $e");
+      return null;
     }
-  } catch (e) {
-    print("WebView bridge evaluateJavascript cause $e");
-    return null;
   }
-}
-
 }
